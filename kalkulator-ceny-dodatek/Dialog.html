@@ -1,0 +1,125 @@
+<style>
+  * { box-sizing: border-box; }
+  body { font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif; font-size: 13px; color: #202124; margin: 0; padding: 16px; }
+  .field { margin-top: 12px; }
+  .field label { display: block; font-size: 12px; color: #5f6368; margin-bottom: 4px; }
+  input { width: 100%; padding: 8px 10px; border: 1px solid #dadce0; border-radius: 6px; font-size: 14px; }
+  input:focus { outline: none; border-color: #1a73e8; box-shadow: 0 0 0 2px rgba(26,115,232,.15); }
+  .toggle { margin-top: 16px; background: none; border: none; color: #1a73e8; font-size: 13px; cursor: pointer; padding: 4px 0; }
+  #szczegoly { max-height: 0; overflow: hidden; transition: max-height .25s ease; }
+  #szczegoly.open { max-height: 600px; }
+  .grid { display: grid; grid-template-columns: 1fr 1fr; gap: 0 12px; border-top: 1px solid #eee; margin-top: 8px; padding-top: 8px; }
+  .preview { margin-top: 10px; padding: 8px 10px; background: #f1f7fe; border-radius: 6px; font-size: 13px; color: #1a56b0; }
+  .actions { margin-top: 18px; display: flex; gap: 8px; }
+  button.primary { background: #1a73e8; color: #fff; border: none; border-radius: 6px; padding: 9px 16px; font-size: 13px; cursor: pointer; }
+  button.primary:disabled { background: #a9c6f5; cursor: default; }
+  button.secondary { background: none; border: 1px solid #dadce0; border-radius: 6px; padding: 9px 16px; font-size: 13px; cursor: pointer; }
+  .status { margin-top: 8px; font-size: 12px; color: #5f6368; }
+</style>
+
+<div class="field">
+  <label>Cena PLN/jedn.</label>
+  <input id="cena" type="number" value="<?= dane.cena || '' ?>">
+</div>
+
+<button class="toggle" onclick="document.getElementById('szczegoly').classList.toggle('open')">
+  Obliczenia szczegółowe ▾
+</button>
+
+<div id="szczegoly">
+  <div class="grid">
+    <div class="field"><label>Narzut na robociznę (%)</label><input id="n" class="calc" type="number" value="<?= (dane.n||0)*100 ?>"></div>
+    <div class="field"><label>Narzut na materiał (%)</label><input id="o" class="calc" type="number" value="<?= (dane.o||0)*100 ?>"></div>
+    <div class="field"><label>Robocizna podwyk. bez narzutu</label><input id="p" class="calc" type="number" value="<?= dane.p||'' ?>"></div>
+    <div class="field"><label>Robocizna własna</label><input id="q" class="calc" type="number" value="<?= dane.q||'' ?>"></div>
+    <div class="field"><label>Materiał PLN bez narzutu</label><input id="r" class="calc" type="number" value="<?= dane.r||'' ?>"></div>
+    <div class="field">
+      <label><? if (dane.wariant === 'kurs_pozycja') { ?>Kurs PLN/€ w momencie zakupu <span id="gwiazdkaS" style="display:none;color:#d93025;">*</span><? } else { ?>Materiał Euro bez narzutu<? } ?></label>
+      <input id="s" class="calc" type="number" value="<?= dane.s||'' ?>">
+      <div id="hintS" style="display:none;color:#d93025;font-size:11px;margin-top:4px;">Uzupełnij kurs — podano materiał w Euro</div>
+    </div>
+    <div class="field">
+      <label><? if (dane.wariant === 'kurs_pozycja') { ?>Materiał Euro bez narzutu<? } else { ?>Rabat na materiał (%)<? } ?></label>
+      <input id="t" class="calc" type="number" value="<?= dane.wariant==='kurs_pozycja' ? (dane.t||'') : (dane.t||0)*100 ?>">
+    </div>
+    <div class="field"><label>Akcesoria bez narzutu</label><input id="v" class="calc" type="number" value="<?= dane.v||'' ?>"></div>
+  </div>
+  <div class="preview" id="podglad">Szacowana cena: —</div>
+</div>
+
+<div class="actions">
+  <button class="primary" id="btnZapisz" onclick="zapisz()">Zapisz</button>
+  <button class="secondary" onclick="google.script.host.close()">Anuluj</button>
+</div>
+<div class="status" id="status"></div>
+
+<script>
+  const SHEET = '<?= dane.sheetName ?>';
+  const ROW = <?= dane.row ?>;
+  const KURS = <?= dane.kurs ?>;
+  const WARIANT = '<?= dane.wariant ?>';
+
+  function przelicz() {
+    const v = id => Number(document.getElementById(id).value) || 0;
+    const n = v('n')/100, o = v('o')/100;
+    const p = v('p'), q = v('q'), r = v('r'), akc = v('v');
+    const sVal = v('s'), tVal = v('t');
+    const W = p * (1 + n) + q;
+    let U, X;
+    if (WARIANT === 'kurs_pozycja') {
+      U = sVal ? (tVal / sVal) : 0;
+      X = (r + U + akc) * (1 + o);
+    } else {
+      U = sVal * KURS;
+      X = (r + U + akc) * (1 + o) * (1 - tVal/100);
+    }
+    document.getElementById('podglad').textContent = 'Szacowana cena: ' + (W + X).toFixed(0) + ' zł';
+  }
+  function sprawdzWymagane() {
+    if (WARIANT !== 'kurs_pozycja') return true;
+    const s = Number(document.getElementById('s').value) || 0;
+    const t = Number(document.getElementById('t').value) || 0;
+    const brakujeKursu = (t > 0 && s <= 0);
+    document.getElementById('hintS').style.display = brakujeKursu ? 'block' : 'none';
+    document.getElementById('gwiazdkaS').style.display = (t > 0) ? 'inline' : 'none';
+    document.getElementById('btnZapisz').disabled = brakujeKursu;
+    return !brakujeKursu;
+  }
+
+  function naZmianePola() { przelicz(); sprawdzWymagane(); }
+  document.querySelectorAll('.calc').forEach(el => el.addEventListener('input', naZmianePola));
+  naZmianePola();
+
+  function ustawLadowanie(przycisk, tekst) {
+    przycisk.disabled = true;
+    document.getElementById('status').textContent = tekst;
+  }
+
+  function zapisz(){
+    const btn = document.getElementById('btnZapisz');
+    const rozwiniete = document.getElementById('szczegoly').classList.contains('open');
+    let tryb, dane;
+
+    if (rozwiniete) {
+      tryb = 'szczegolowy';
+      dane = {};
+      ['n','o','p','q','r','s','t','v'].forEach(id => dane[id] = document.getElementById(id).value);
+      if (WARIANT === 'kurs_pozycja') {
+        const s = Number(dane.s) || 0, t = Number(dane.t) || 0;
+        if (t > 0 && s <= 0) {
+          document.getElementById('status').textContent = 'Podaj kurs PLN/€ — wpisałeś materiał w Euro.';
+          return;
+        }
+      }
+    } else {
+      tryb = 'prosty';
+      dane = document.getElementById('cena').value;
+    }
+
+    ustawLadowanie(btn, 'Zapisywanie…');
+    google.script.run
+      .withSuccessHandler(() => google.script.host.close())
+      .withFailureHandler(err => { btn.disabled = false; document.getElementById('status').textContent = 'Błąd: ' + err.message; })
+      .zapiszCene(SHEET, ROW, tryb, dane);
+  }
+</script>
